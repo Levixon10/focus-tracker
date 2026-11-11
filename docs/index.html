@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#2e6f4e">
+<meta name="description" content="Focus tracker: study timers and distraction nudges, synced with the laptop.">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<title>Focus</title>
+<style>
+:root{--bg:#f6f6f4;--fg:#1c1c1a;--muted:#77776f;--card:#ffffff;--accent:#2e6f4e;--warn:#b8532a;--line:#e2e2dc;--on-accent:#ffffff}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#141413;--fg:#edede8;--muted:#9a9a90;--card:#1f1f1d;--accent:#6fbf93;--warn:#f08a5d;--line:#2d2d2a;--on-accent:#0f1f16}}
+:root[data-theme="dark"]{--bg:#141413;--fg:#edede8;--muted:#9a9a90;--card:#1f1f1d;--accent:#6fbf93;--warn:#f08a5d;--line:#2d2d2a;--on-accent:#0f1f16}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,sans-serif;-webkit-tap-highlight-color:transparent}
+main{padding:16px;max-width:560px;margin:0 auto;padding-bottom:env(safe-area-inset-bottom)}
+h1{font-size:22px;margin:8px 0 16px}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:20px 0 8px;font-weight:600}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+.row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.muted{color:var(--muted)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{font:inherit;border:0;border-radius:12px;padding:14px 12px;background:var(--card);color:var(--fg);border:1px solid var(--line);cursor:pointer;min-height:52px}
+button.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:600}
+button.stop{background:var(--warn);color:#fff;border-color:var(--warn);font-weight:600;width:100%}
+button:disabled{opacity:.5}
+input{font:inherit;width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--fg);margin:4px 0 10px}
+.banner{background:var(--warn);color:#fff;border-radius:12px;padding:12px 14px;margin:12px 0;display:none}
+.big{font-size:34px;font-weight:700;font-variant-numeric:tabular-nums;margin:6px 0}
+.hidden{display:none!important}
+.err{color:var(--warn);margin-top:10px;min-height:1em}
+.linkbtn{background:none;border:0;color:var(--muted);padding:6px 0;min-height:0;width:auto;text-decoration:underline}
+</style>
+</head>
+<body>
+<main>
+  <h1>Focus</h1>
+
+  <section id="login" class="card hidden">
+    <form id="loginForm">
+      <label class="muted">Supabase project URL</label>
+      <input id="url" type="url" placeholder="https://xyz.supabase.co" required>
+      <label class="muted">Supabase anon key</label>
+      <input id="key" placeholder="eyJ..." required>
+      <label class="muted">Email</label>
+      <input id="email" type="email" autocomplete="username" required>
+      <label class="muted">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+      <button class="primary" type="submit" style="width:100%">Log in</button>
+      <div id="loginErr" class="err"></div>
+    </form>
+  </section>
+
+  <div id="app" class="hidden">
+    <div id="banner" class="banner"></div>
+
+    <section class="card" id="runningCard">
+      <div class="muted" id="runLabel">No session running</div>
+      <div class="big" id="runTime">0:00:00</div>
+      <button class="stop hidden" id="stopBtn">Stop session</button>
+    </section>
+
+    <h2>Start a session</h2>
+    <div class="grid" id="subjects"></div>
+
+    <h2>Today</h2>
+    <section class="card" id="today"><div class="muted">Loading…</div></section>
+
+    <h2>Distraction (laptop)</h2>
+    <section class="card" id="distraction"><div class="muted">Loading…</div></section>
+
+    <p style="margin-top:24px;text-align:center">
+      <button class="linkbtn" id="logoutBtn">Log out</button>
+    </p>
+  </div>
+</main>
+
+<script>
+const SUBJECTS = ["TOC", "PPL", "OS", "CompArch", "DL", "Self-improving Harness", "Refusal project"];
+const DEVICE = "phone";
+const NUDGE_WINDOW_MIN = 4;      // look back this many minutes on the laptop's distraction time
+const NUDGE_THRESHOLD_SEC = 120; // nudge if at least this much distraction in that window
+const NUDGE_COOLDOWN_MS = 10 * 60 * 1000;
+
+const $ = (id) => document.getElementById(id);
+const LS_KEY = "focus-phone";
+let st = loadState();
+let runningSession = null;
+let lastNudge = 0;
+
+function loadState() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch { return {}; }
+}
+function saveState() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(st)); } catch { /* private mode: keep going */ }
+}
+
+async function authPost(path, body) {
+  const r = await fetch(st.url + path, {
+    method: "POST",
+    headers: { apikey: st.key, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(r.status === 400 ? "Wrong email or password" : "Login failed (" + r.status + ")");
+  return r.json();
+}
+
+async function ensureToken() {
+  if (st.access && st.exp > Date.now() + 60000) return;
+  if (!st.refresh) throw new Error("NEEDS_LOGIN");
+  let d;
+  try {
+    d = await authPost("/auth/v1/token?grant_type=refresh_token", { refresh_token: st.refresh });
+  } catch {
+    throw new Error("NEEDS_LOGIN");
+  }
+  st.access = d.access_token;
+  st.refresh = d.refresh_token;
+  st.exp = Date.now() + d.expires_in * 1000;
+  saveState();
+}
+
+async function api(path, { method = "GET", body, prefer } = {}) {
+  await ensureToken();
+  const headers = { apikey: st.key, Authorization: "Bearer " + st.access, "Content-Type": "application/json" };
+  if (prefer) headers.Prefer = prefer;
+  const r = await fetch(st.url + "/rest/v1/" + path, {
+    method, headers, body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) throw new Error("Request failed (" + r.status + ")");
+  const text = await r.text();
+  return text ? JSON.parse(text) : null;
+}
+
+function midnightISO() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+function fmtDur(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  return h ? h + "h " + String(m).padStart(2, "0") + "m" : m + "m";
+}
+function fmtClock(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return h + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+}
+
+function showBanner(text) {
+  const b = $("banner");
+  b.textContent = text;
+  b.style.display = "block";
+  setTimeout(() => { b.style.display = "none"; }, 15000);
+}
+
+async function loadRunning() {
+  const rows = await api("sessions?ended_at=is.null&select=*&order=started_at.desc&limit=1");
+  runningSession = rows && rows[0] ? rows[0] : null;
+  renderRunning();
+}
+
+function renderRunning() {
+  const running = !!runningSession;
+  $("runLabel").textContent = running ? "Focusing on " + runningSession.subject : "No session running";
+  $("stopBtn").classList.toggle("hidden", !running);
+  if (!running) $("runTime").textContent = "0:00:00";
+  document.querySelectorAll("#subjects button").forEach((b) => { b.disabled = false; });
+}
+
+async function startSession(subject) {
+  try {
+    const now = new Date().toISOString();
+    await api("sessions?ended_at=is.null", { method: "PATCH", body: { ended_at: now }, prefer: "return=minimal" });
+    await api("sessions", {
+      method: "POST",
+      body: { subject, started_at: now, device: DEVICE },
+      prefer: "return=minimal",
+    });
+    await refreshAll();
+  } catch (e) { handleError(e); }
+}
+
+async function stopSession() {
+  try {
+    await api("sessions?ended_at=is.null", { method: "PATCH", body: { ended_at: new Date().toISOString() }, prefer: "return=minimal" });
+    await refreshAll();
+  } catch (e) { handleError(e); }
+}
+
+async function renderToday() {
+  const since = midnightISO();
+  const [sessions, activity] = await Promise.all([
+    api("sessions?started_at=gte." + encodeURIComponent(since) + "&select=*&order=started_at"),
+    api("activity?minute=gte." + encodeURIComponent(since) + "&select=category,subject,seconds"),
+  ]);
+  const now = Date.now();
+
+  const bySubject = {};
+  for (const s of sessions) {
+    const end = s.ended_at ? new Date(s.ended_at).getTime() : now;
+    bySubject[s.subject] = (bySubject[s.subject] || 0) + (end - new Date(s.started_at).getTime()) / 1000;
+  }
+  const subjectRows = Object.entries(bySubject).sort((a, b) => b[1] - a[1]);
+  $("today").innerHTML = subjectRows.length
+    ? subjectRows.map(([name, sec]) => '<div class="row"><span>' + esc(name) + '</span><span>' + fmtDur(sec) + '</span></div>').join("")
+    : '<div class="muted">No focus sessions yet today.</div>';
+
+  let distraction = 0;
+  const bySubjectSec = {};
+  for (const a of activity) {
+    if (a.category === "distraction") distraction += a.seconds;
+    if (a.subject && (a.category === "subject" || a.category === "project")) {
+      bySubjectSec[a.subject] = (bySubjectSec[a.subject] || 0) + a.seconds;
+    }
+  }
+  $("distraction").innerHTML =
+    '<div class="row"><span>Distraction time today</span><span>' + fmtDur(distraction) + '</span></div>' +
+    (Object.keys(bySubjectSec).length
+      ? Object.entries(bySubjectSec).sort((a, b) => b[1] - a[1]).map(([n, s]) =>
+          '<div class="row"><span class="muted">On-task on laptop: ' + esc(n) + '</span><span>' + fmtDur(s) + '</span></div>').join("")
+      : '<div class="muted">No laptop activity synced yet.</div>');
+}
+
+async function checkNudge() {
+  if (!runningSession) return;
+  if (Date.now() - lastNudge < NUDGE_COOLDOWN_MS) return;
+  const since = new Date(Date.now() - NUDGE_WINDOW_MIN * 60000).toISOString();
+  const rows = await api("activity?device=eq.laptop&category=eq.distraction&minute=gte." + encodeURIComponent(since) + "&select=seconds");
+  const total = rows.reduce((sum, r) => sum + r.seconds, 0);
+  if (total >= NUDGE_THRESHOLD_SEC) {
+    lastNudge = Date.now();
+    const msg = "Distraction on the laptop: " + fmtDur(total) + " in the last " + NUDGE_WINDOW_MIN + " min. Back to " + runningSession.subject + "?";
+    showBanner(msg);
+    if ("Notification" in window && Notification.permission === "granted") {
+      new Notification("Focus check", { body: msg, icon: "icon.svg" });
+    }
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+  }
+}
+
+function tick() {
+  if (!runningSession) return;
+  const elapsed = (Date.now() - new Date(runningSession.started_at).getTime()) / 1000;
+  $("runTime").textContent = fmtClock(elapsed);
+}
+
+async function refreshAll() {
+  try {
+    await loadRunning();
+    await renderToday();
+    await checkNudge();
+    setError("");
+  } catch (e) { handleError(e); }
+}
+
+function setError(msg) { $("loginErr").textContent = msg; }
+
+function handleError(e) {
+  if (e.message === "NEEDS_LOGIN") { showLogin(); return; }
+  showBanner("Problem: " + e.message);
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function showLogin() {
+  $("app").classList.add("hidden");
+  $("login").classList.remove("hidden");
+  $("url").value = st.url || "";
+  $("key").value = st.key || "";
+  $("email").value = st.email || "";
+}
+
+function showApp() {
+  $("login").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  refreshAll();
+}
+
+$("loginForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const url = $("url").value.trim().replace(/\/$/, "");
+  const key = $("key").value.trim();
+  const email = $("email").value.trim();
+  try {
+    const d = await authPost("/auth/v1/token?grant_type=password", { email, password: $("password").value });
+    st = { url, key, email, refresh: d.refresh_token, access: d.access_token, exp: Date.now() + d.expires_in * 1000 };
+    saveState();
+    $("password").value = "";
+    showApp();
+  } catch (e) { setError(e.message); }
+});
+
+$("logoutBtn").addEventListener("click", () => {
+  st = { url: st.url, key: st.key, email: st.email };
+  saveState();
+  showLogin();
+});
+
+$("stopBtn").addEventListener("click", stopSession);
+
+$("subjects").innerHTML = SUBJECTS.map((s) =>
+  '<button class="primary" data-subject="' + esc(s) + '">' + esc(s) + '</button>').join("");
+$("subjects").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-subject]");
+  if (b) startSession(b.dataset.subject);
+});
+
+if ("Notification" in window && Notification.permission === "default") {
+  // Ask only after the user has interacted, so the prompt is not blocked.
+  document.addEventListener("click", () => Notification.requestPermission(), { once: true });
+}
+
+setInterval(tick, 1000);
+setInterval(() => { if (!document.hidden && st.refresh) refreshAll(); }, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && st.refresh) refreshAll(); });
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+
+if (st.refresh && st.url && st.key) showApp(); else showLogin();
+</script>
+</body>
+</html>

@@ -5,6 +5,9 @@ import time
 
 from . import store
 from .classify import active_window, classify, load_rules
+from .sync import SyncError, sync_once
+
+SYNC_EVERY = 60  # seconds between uploads
 
 
 def nudge(subject: str, minutes: int):
@@ -28,10 +31,18 @@ def run(device_override: str | None = None):
     distraction_streak = 0.0
     nudged = False
     last_label = None
+    last_sync = 0.0
 
     while True:
         time.sleep(poll)
         now = time.time()
+
+        if now - last_sync >= SYNC_EVERY:
+            last_sync = now
+            try:
+                sync_once(conn)
+            except SyncError as e:
+                print(f"[ft] sync skipped: {e}", flush=True)
         # Cap elapsed so a suspended laptop does not add hours in one tick.
         elapsed = min(now - last, poll * 2)
         last = now

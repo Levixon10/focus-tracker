@@ -18,6 +18,7 @@ create table if not exists sessions (
     device      text    not null,
     synced      integer not null default 0
 );
+create unique index if not exists sessions_device_start on sessions (device, started_at);
 create table if not exists activity (
     minute    integer not null,         -- unix time truncated to the minute
     device    text    not null,

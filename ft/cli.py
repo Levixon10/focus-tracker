@@ -29,14 +29,28 @@ def main():
     sub.add_parser("stop", help="stop the current focus session")
     sub.add_parser("status", help="show the current session")
     sub.add_parser("today", help="show today's totals")
+    sub.add_parser("login", help="log in to Supabase for cross-device sync")
+    sub.add_parser("sync", help="upload unsynced rows now")
     args = p.parse_args()
 
     if args.cmd == "daemon":
         from .daemon import run
         run()
         return
+    if args.cmd == "login":
+        from .sync import interactive_login
+        interactive_login()
+        return
 
     conn = store.connect()
+    if args.cmd == "sync":
+        from .sync import SyncError, sync_once
+        try:
+            s, a = sync_once(conn)
+            print(f"Synced {s} sessions and {a} activity rows.")
+        except SyncError as e:
+            print(f"Sync failed: {e}")
+        return
     settings, _ = load_rules()
     device = settings.get("device", "laptop")
 
