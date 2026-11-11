@@ -1,0 +1,85 @@
+# Window classification rules. The first rule that matches wins, so order matters:
+# put distraction rules first, then specific subject/project rules, then broad ones.
+#
+# Fields (all optional except name and category):
+#   class    regex matched against the window class (e.g. "com.mitchellh.ghostty")
+#   title    regex matched against the window title (e.g. "Instagram • Google Chrome")
+#   category "distraction" | "subject" | "project" | "neutral"
+#   subject  fixed subject name. If omitted for subject/project, the running focus session's subject is used.
+
+[settings]
+poll_seconds = 5                 # how often the active window is sampled
+distraction_nudge_seconds = 180  # nudge after this much continuous distraction during a focus session
+device = "laptop"
+
+# ---- Distractions ----
+[[rules]]
+name = "Social feeds in browser"
+category = "distraction"
+title = "(?i)instagram|reddit|tiktok|facebook|\\bx\\.com\\b|twitter|shorts|reels|snapchat|pinterest"
+
+[[rules]]
+name = "Messaging"
+category = "distraction"
+class = "(?i)whatsapp|telegram|discord|signal"
+title = "(?i)whatsapp|telegram|discord|signal"
+
+[[rules]]
+name = "Entertainment"
+category = "distraction"
+title = "(?i)netflix|prime video|twitch"
+
+[[rules]]
+name = "YouTube (not lectures)"
+category = "distraction"
+title = "^(?!.*(?i:lecture|tutorial|course)).*(?i:youtube)"
+
+# ---- Subjects (edit the regexes to match your files and tabs) ----
+[[rules]]
+name = "TOC"
+category = "subject"
+subject = "TOC"
+title = "(?i)theory of computation|\\btoc\\b|automata|turing"
+
+[[rules]]
+name = "PPL"
+category = "subject"
+subject = "PPL"
+title = "(?i)programming languages|\\bppl\\b"
+
+[[rules]]
+name = "OS"
+category = "subject"
+subject = "OS"
+title = "(?i)operating system|\\bos\\b|xv6|scheduler|paging"
+
+[[rules]]
+name = "Computer Architecture"
+category = "subject"
+subject = "CompArch"
+title = "(?i)computer architecture|pipeline|cache|\\bcompark\\b"
+
+[[rules]]
+name = "Deep Learning"
+category = "subject"
+subject = "DL"
+title = "(?i)deep learning|neural|backprop|\\bdl\\b"
+
+# ---- Projects ----
+[[rules]]
+name = "Self-improving Harness"
+category = "project"
+subject = "Self-improving Harness"
+title = "(?i)self-improving harness|harness"
+
+[[rules]]
+name = "On-Opal Refusal"
+category = "project"
+subject = "Refusal project"
+title = "(?i)opal|refusal"
+
+# ---- Broad fallbacks ----
+[[rules]]
+name = "Terminal and editor"
+category = "neutral"
+class = "(?i)ghostty|kitty|alacritty|foot|code|cursor|jetbrains"

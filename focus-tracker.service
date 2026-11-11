@@ -1,0 +1,12 @@
+[Unit]
+Description=Focus tracker: window activity logger
+After=graphical-session.target
+
+[Service]
+WorkingDirectory=%h/projects/focus-tracker
+ExecStart=/usr/bin/python3 -m ft.cli daemon
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
