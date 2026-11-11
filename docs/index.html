@@ -98,10 +98,10 @@ function saveState() {
   try { localStorage.setItem(LS_KEY, JSON.stringify(st)); } catch { /* private mode: keep going */ }
 }
 
-async function authPost(path, body) {
-  const r = await fetch(st.url + path, {
+async function authPost(path, body, base = st.url, key = st.key) {
+  const r = await fetch(base + path, {
     method: "POST",
-    headers: { apikey: st.key, "Content-Type": "application/json" },
+    headers: { apikey: key, "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!r.ok) throw new Error(r.status === 400 ? "Wrong email or password" : "Login failed (" + r.status + ")");
@@ -294,7 +294,7 @@ $("loginForm").addEventListener("submit", async (ev) => {
     return;
   }
   try {
-    const d = await authPost("/auth/v1/token?grant_type=password", { email, password: $("password").value });
+    const d = await authPost("/auth/v1/token?grant_type=password", { email, password: $("password").value }, url, key);
     st = { url, key, email, refresh: d.refresh_token, access: d.access_token, exp: Date.now() + d.expires_in * 1000 };
     saveState();
     $("password").value = "";
