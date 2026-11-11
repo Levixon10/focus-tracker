@@ -42,7 +42,7 @@ input{font:inherit;width:100%;padding:12px;border-radius:10px;border:1px solid v
   <section id="login" class="card hidden">
     <form id="loginForm">
       <label class="muted">Supabase project URL</label>
-      <input id="url" type="url" placeholder="https://xyz.supabase.co" required>
+      <input id="url" type="url" value="https://roricwquzhzybogbfttq.supabase.co" placeholder="https://xyz.supabase.co" required>
       <label class="muted">Supabase anon key</label>
       <input id="key" placeholder="eyJ..." required>
       <label class="muted">Email</label>
@@ -289,6 +289,10 @@ $("loginForm").addEventListener("submit", async (ev) => {
   const url = $("url").value.trim().replace(/\/$/, "");
   const key = $("key").value.trim();
   const email = $("email").value.trim();
+  if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url)) {
+    setError("The Supabase URL must end in .supabase.co (for example https://xyz.supabase.co). This is not it.");
+    return;
+  }
   try {
     const d = await authPost("/auth/v1/token?grant_type=password", { email, password: $("password").value });
     st = { url, key, email, refresh: d.refresh_token, access: d.access_token, exp: Date.now() + d.expires_in * 1000 };
